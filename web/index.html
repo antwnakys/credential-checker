@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Credential Checker — strength &amp; breach lookup</title>
+  <style>
+    :root {
+      --bg: #0f1420; --card: #171d2b; --fg: #e7ecf3; --muted: #8a97ac;
+      --border: #2a3346; --accent: #5b8cff;
+      --red: #ff5c6c; --yellow: #ffca4b; --green: #35d07f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg); color: var(--fg);
+      display: flex; align-items: center; justify-content: center; padding: 24px;
+    }
+    .card {
+      width: 100%; max-width: 560px; background: var(--card);
+      border: 1px solid var(--border); border-radius: 16px; padding: 28px;
+    }
+    h1 { margin: 0 0 4px; font-size: 1.4rem; }
+    .sub { color: var(--muted); font-size: .9rem; margin: 0 0 20px; }
+    .field { position: relative; }
+    input[type=password], input[type=text] {
+      width: 100%; padding: 14px 46px 14px 14px; font-size: 1rem;
+      background: var(--bg); color: var(--fg);
+      border: 1px solid var(--border); border-radius: 10px; outline: none;
+    }
+    input:focus { border-color: var(--accent); }
+    .toggle {
+      position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; color: var(--muted); cursor: pointer;
+      font-size: .8rem; padding: 6px 8px;
+    }
+    .meter { height: 8px; border-radius: 4px; background: var(--border); margin: 16px 0 6px; overflow: hidden; }
+    .meter > span { display: block; height: 100%; width: 0; transition: width .25s, background .25s; }
+    .verdict { font-weight: 700; font-size: 1rem; }
+    .row { display: flex; justify-content: space-between; color: var(--muted); font-size: .85rem; margin-top: 4px; }
+    ul { margin: 14px 0 0; padding-left: 18px; font-size: .88rem; }
+    li.warn { color: var(--yellow); }
+    li.tip { color: var(--muted); }
+    .breach { margin-top: 18px; font-size: .9rem; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border); }
+    .breach.found { color: var(--red); border-color: var(--red); }
+    .breach.safe { color: var(--green); border-color: var(--green); }
+    .breach.checking, .breach.error { color: var(--muted); }
+    .privacy { color: var(--muted); font-size: .78rem; margin-top: 20px; line-height: 1.5; }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>Credential Checker</h1>
+    <p class="sub">Rate a password's strength and check it against known breaches — without ever sending the password.</p>
+
+    <div class="field">
+      <input id="pw" type="password" placeholder="Type a password to test" autocomplete="off" spellcheck="false" />
+      <button class="toggle" id="toggle" type="button">show</button>
+    </div>
+
+    <div class="meter"><span id="bar"></span></div>
+    <div class="row">
+      <span class="verdict" id="verdict">—</span>
+      <span id="entropy"></span>
+    </div>
+
+    <ul id="notes"></ul>
+    <div class="breach" id="breach" hidden></div>
+
+    <p class="privacy">
+      <strong>Your password never leaves this page in a usable form.</strong>
+      The breach check hashes it with SHA-1 in your browser and sends only the
+      first 5 characters of that hash to
+      <a href="https://haveibeenpwned.com/API/v3#PwnedPasswords" target="_blank" rel="noopener">Have I Been Pwned</a>,
+      which returns many candidates to compare locally (k-anonymity). Everything else runs offline.
+    </p>
+  </main>
+
+  <script>
+    const COMMON = new Set(["password","123456","123456789","12345678","qwerty","abc123",
+      "password1","111111","123123","admin","letmein","welcome","monkey","dragon",
+      "iloveyou","sunshine","princess","football","qwerty123","000000","1234567890"]);
+    const ROWS = ["qwertyuiop","asdfghjkl","zxcvbnm","1234567890"];
+
+    const pw = document.getElementById("pw");
+    const bar = document.getElementById("bar");
+    const verdictEl = document.getElementById("verdict");
+    const entropyEl = document.getElementById("entropy");
+    const notes = document.getElementById("notes");
+    const breachEl = document.getElementById("breach");
+
+    document.getElementById("toggle").onclick = () => {
+      const show = pw.type === "password";
+      pw.type = show ? "text" : "password";
+      document.getElementById("toggle").textContent = show ? "hide" : "show";
+    };
+
+    function poolSize(p) {
+      let n = 0;
+      if (/[a-z]/.test(p)) n += 26;
+      if (/[A-Z]/.test(p)) n += 26;
+      if (/[0-9]/.test(p)) n += 10;
+      if (/[^a-zA-Z0-9]/.test(p)) n += 33;
+      return n;
+    }
+    function keyboardWalk(p) {
+      const l = p.toLowerCase();
+      return ROWS.some(r => {
+        for (let s = 4; s <= r.length; s++)
+          for (let i = 0; i + s <= r.length; i++) {
+            const c = r.slice(i, i + s);
+            if (l.includes(c) || l.includes([...c].reverse().join(""))) return true;
+          }
+        return false;
+      });
+    }
+    function numericSeq(p) {
+      const seqs = ["0123456789","9876543210"];
+      return seqs.some(seq => {
+        for (let s = 4; s <= seq.length; s++)
+          for (let i = 0; i + s <= seq.length; i++)
+            if (p.includes(seq.slice(i, i + s))) return true;
+        return false;
+      });
+    }
+
+    function analyze(p) {
+      const warnings = [], tips = [];
+      const pool = poolSize(p);
+      let entropy = pool ? p.length * Math.log2(pool) : 0;
+
+      if (COMMON.has(p.toLowerCase())) { warnings.push("One of the most common passwords."); entropy = Math.min(entropy, 8); }
+      if (keyboardWalk(p)) { warnings.push("Contains a keyboard pattern (e.g. 'qwerty')."); entropy *= 0.6; }
+      if (numericSeq(p)) { warnings.push("Contains a numeric sequence (e.g. '1234')."); entropy *= 0.7; }
+      if (/(.)\1{2,}/.test(p)) { warnings.push("Contains a repeated character run."); entropy *= 0.8; }
+
+      if (p.length < 12) tips.push("Make it at least 12 characters long.");
+      if (pool < 62) tips.push("Mix uppercase, lowercase, digits and symbols.");
+      if (!tips.length) tips.push("Great — for even better security use a unique passphrase per site.");
+
+      let verdict, pct, color;
+      if (entropy < 28) { verdict = "very weak"; pct = 12; color = "var(--red)"; }
+      else if (entropy < 36) { verdict = "weak"; pct = 30; color = "var(--red)"; }
+      else if (entropy < 60) { verdict = "fair"; pct = 55; color = "var(--yellow)"; }
+      else if (entropy < 128) { verdict = "strong"; pct = 80; color = "var(--green)"; }
+      else { verdict = "very strong"; pct = 100; color = "var(--green)"; }
+
+      return { entropy: Math.round(entropy * 10) / 10, verdict, pct, color, warnings, tips };
+    }
+
+    async function sha1Hex(str) {
+      const buf = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(str));
+      return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("").toUpperCase();
+    }
+
+    let breachToken = 0;
+    async function checkBreach(p) {
+      const token = ++breachToken;
+      breachEl.hidden = false;
+      breachEl.className = "breach checking";
+      breachEl.textContent = "Checking breach database (only a 5-char hash prefix is sent)…";
+      try {
+        const hash = await sha1Hex(p);
+        const prefix = hash.slice(0, 5), suffix = hash.slice(5);
+        const res = await fetch("https://api.pwnedpasswords.com/range/" + prefix);
+        const text = await res.text();
+        if (token !== breachToken) return; // a newer keystroke superseded this
+        let count = 0;
+        for (const line of text.split("\n")) {
+          const [suf, c] = line.trim().split(":");
+          if (suf === suffix) { count = parseInt(c, 10); break; }
+        }
+        if (count > 0) {
+          breachEl.className = "breach found";
+          breachEl.textContent = `✗ Found in breaches ${count.toLocaleString()} times — do not use this password.`;
+        } else {
+          breachEl.className = "breach safe";
+          breachEl.textContent = "✓ Not found in any known breach.";
+        }
+      } catch (e) {
+        if (token !== breachToken) return;
+        breachEl.className = "breach error";
+        breachEl.textContent = "Could not reach the breach database (offline?).";
+      }
+    }
+
+    let debounce;
+    pw.addEventListener("input", () => {
+      const p = pw.value;
+      if (!p) {
+        bar.style.width = "0"; verdictEl.textContent = "—"; entropyEl.textContent = "";
+        notes.innerHTML = ""; breachEl.hidden = true;
+        return;
+      }
+      const r = analyze(p);
+      bar.style.width = r.pct + "%";
+      bar.style.background = r.color;
+      verdictEl.textContent = r.verdict.toUpperCase();
+      verdictEl.style.color = r.color;
+      entropyEl.textContent = r.entropy + " bits of entropy";
+      notes.innerHTML = r.warnings.map(w => `<li class="warn">⚠ ${w}</li>`).join("")
+                      + r.tips.map(t => `<li class="tip">• ${t}</li>`).join("");
+
+      clearTimeout(debounce);
+      breachEl.hidden = false;
+      breachEl.className = "breach checking";
+      breachEl.textContent = "Waiting for you to stop typing…";
+      debounce = setTimeout(() => checkBreach(p), 600);
+    });
+  </script>
+</body>
+</html>

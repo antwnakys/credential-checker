@@ -1,0 +1,4 @@
+# Runtime: none — pwcheck uses only the Python standard library.
+
+# Development / testing only:
+pytest>=7.0
