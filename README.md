@@ -1,5 +1,7 @@
 # 🔐 Credential Checker
 
+**▶️ [Try the live demo](https://antwnakys.github.io/credential-checker/)** — runs entirely in your browser.
+
 A privacy-preserving tool that rates how strong a password is **and** checks
 whether it has already leaked in a real data breach — *without ever sending the
 password over the network*.
