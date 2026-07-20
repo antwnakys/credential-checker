@@ -1,6 +1,6 @@
 # 🔐 Credential Checker
 
-![Python](https://img.shields.io/badge/Python-3776AB-?style=flat&logo=python&logoColor=white) ![Tests](https://img.shields.io/badge/tests-15%20passing-brightgreen?style=flat) ![License](https://img.shields.io/badge/license-MIT-green?style=flat) ![Dependencies](https://img.shields.io/badge/dependencies-stdlib%20only-lightgrey?style=flat)
+![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white) ![Tests](https://img.shields.io/badge/tests-15%20passing-brightgreen?style=flat) ![License](https://img.shields.io/badge/license-MIT-green?style=flat) ![Dependencies](https://img.shields.io/badge/dependencies-stdlib%20only-lightgrey?style=flat)
 
 **▶️ [Try the live demo](https://antwnakys.github.io/credential-checker/)** — runs entirely in your browser.
 
